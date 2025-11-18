@@ -10,7 +10,7 @@ import OrderForm from './components/OrderForm';
 import OrderDetail from './components/OrderDetail';
 import EmployeeManagement from './components/EmployeeManagement';
 import './index.css';
-import logo from './assets/logo.png';
+import logo from './assets/logo.png?url';
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
