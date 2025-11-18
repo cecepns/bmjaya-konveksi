@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Toaster } from 'react-hot-toast';
 import axios from 'axios';
-import logo from '../assets/logo.png';
+
+const logo = '/logo.png';
 
 const Login = () => {
   const navigate = useNavigate();
