@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { Upload, X, CheckCircle, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import PropTypes from 'prop-types';
 import Select from 'react-select';
+import AsyncSelect from 'react-select/async';
 
 const PRODUCTION_STEPS = [
   { number: 1, name: 'Desain', hasWeight: false, hasJahit: false },
@@ -19,7 +20,6 @@ const PRODUCTION_STEPS = [
 
 const ProductionTab = ({ orderId, orderNumber }) => {
   const [steps, setSteps] = useState([]);
-  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedStep, setExpandedStep] = useState(null);
   const [saving, setSaving] = useState(null);
@@ -27,23 +27,41 @@ const ProductionTab = ({ orderId, orderNumber }) => {
 
   useEffect(() => {
     initializeAndFetchSteps();
-    fetchEmployees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
-  const fetchEmployees = async () => {
+  // Async function untuk fetch employees dengan paginasi dan search
+  const loadEmployeesOptions = async (searchValue = '') => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get(
-        'https://api-inventory.isavralabel.com/bmjaya-printing/api/employees',
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const page = 1; // Always start from page 1 for search/initial load
+      
+      // Build URL with search parameter if provided
+      let url = `https://api-inventory.isavralabel.com/bmjaya-printing/api/employees?page=${page}`;
+      if (searchValue && searchValue.trim()) {
+        url += `&search=${encodeURIComponent(searchValue)}`;
+      }
+      
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
       if (response.data.success) {
-        setEmployees(response.data.employees);
+        const options = response.data.employees.map((emp) => ({
+          value: emp.id,
+          label: emp.nama,
+          nama: emp.nama,
+          no_telpon: emp.no_telpon,
+          email: emp.email
+        }));
+
+        return options;
       }
+
+      return [];
     } catch (error) {
       console.error('Fetch employees error:', error);
+      return [];
     }
   };
 
@@ -334,25 +352,28 @@ const ProductionTab = ({ orderId, orderNumber }) => {
               {/* Step Details */}
               {isExpanded && (
                 <div className="border-t border-gray-200 p-4 space-y-4 bg-white">
-                  {/* PIC Selection */}
+                  {/* PIC Selection dengan Paginasi */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Nama PIC / Orang yang Mengerjakan
                     </label>
-                    <Select
-                      options={employees.map((emp) => ({
-                        value: emp.id,
-                        label: emp.nama
-                      }))}
+                    <AsyncSelect
+                      name="pic_employee"
+                      loadOptions={loadEmployeesOptions}
+                      defaultOptions={true}
                       value={step.pic_id ? {
                         value: step.pic_id,
-                        label: employees.find(emp => emp.id === step.pic_id)?.nama || ''
+                        label: step.pic_nama || ''
                       } : null}
                       onChange={(option) => handleInputChange(step.step_number, 'pic_id', option ? option.value : null)}
                       placeholder="-- Pilih Karyawan --"
                       isClearable
                       isSearchable
+                      isMulti={false}
+                      cacheOptions
                       classNamePrefix="react-select"
+                      noOptionsMessage={() => 'Tidak ada karyawan'}
+                      loadingMessage={() => 'Memuat...'}
                       styles={{
                         control: (base) => ({
                           ...base,

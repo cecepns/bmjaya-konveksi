@@ -399,21 +399,35 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
 
 // Employee Management Routes
 
-// Get all employees with pagination
+// Get all employees with pagination and search
 app.get('/api/employees', authenticateToken, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
+    const search = req.query.search || '';
     const limit = 10;
     const offset = (page - 1) * limit;
 
     const connection = await mysql.createConnection(dbConfig);
     
-    const [employees] = await connection.execute(
-      'SELECT * FROM employees ORDER BY nama ASC LIMIT ? OFFSET ?',
-      [limit, offset]
-    );
+    let query = 'SELECT * FROM employees';
+    let countQuery = 'SELECT COUNT(*) as total FROM employees';
+    const params = [];
+    
+    // Add search filter if provided
+    if (search.trim()) {
+      const searchTerm = `%${search}%`;
+      query += ' WHERE nama LIKE ? OR no_telpon LIKE ? OR email LIKE ?';
+      countQuery += ' WHERE nama LIKE ? OR no_telpon LIKE ? OR email LIKE ?';
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+    
+    query += ' ORDER BY nama ASC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    
+    const [employees] = await connection.execute(query, params);
 
-    const [countResult] = await connection.execute('SELECT COUNT(*) as total FROM employees');
+    const countParams = search.trim() ? [`%${search}%`, `%${search}%`, `%${search}%`] : [];
+    const [countResult] = await connection.execute(countQuery, countParams);
     const totalEmployees = countResult[0].total;
     const totalPages = Math.ceil(totalEmployees / limit);
 
