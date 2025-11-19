@@ -3,7 +3,6 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { Upload, X, CheckCircle, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import PropTypes from 'prop-types';
-import Select from 'react-select';
 import AsyncSelect from 'react-select/async';
 
 const PRODUCTION_STEPS = [
@@ -146,6 +145,22 @@ const ProductionTab = ({ orderId, orderNumber }) => {
     ));
   };
 
+  const handleEmployeeChange = (stepNumber, selectedOptions) => {
+    // Store both the employee IDs and names for display
+    const employees = selectedOptions || [];
+    const employeeIds = employees.map(e => e.value);
+    
+    setSteps(prev => prev.map(s =>
+      s.step_number === stepNumber 
+        ? { 
+            ...s, 
+            employee_ids: employeeIds,
+            employees: employees.map(e => ({ id: e.value, nama: e.label }))
+          } 
+        : s
+    ));
+  };
+
   const handleSaveStep = async (stepNumber) => {
     setSaving(stepNumber);
     try {
@@ -156,7 +171,16 @@ const ProductionTab = ({ orderId, orderNumber }) => {
       formData.append('tanggal', step.tanggal || '');
       formData.append('status', step.status || 'pending');
       formData.append('catatan', step.catatan || '');
-      if (step.pic_id) formData.append('pic_id', step.pic_id);
+      
+      // Handle both old pic_id and new employee_ids
+      if (step.employee_ids && step.employee_ids.length > 0) {
+        step.employee_ids.forEach((id, idx) => {
+          formData.append(`employee_ids[${idx}]`, id);
+        });
+      } else if (step.pic_id) {
+        // Backward compatibility
+        formData.append('employee_ids[0]', step.pic_id);
+      }
 
       const stepConfig = PRODUCTION_STEPS.find(s => s.number === stepNumber);
       if (stepConfig.hasWeight) {
@@ -352,24 +376,26 @@ const ProductionTab = ({ orderId, orderNumber }) => {
               {/* Step Details */}
               {isExpanded && (
                 <div className="border-t border-gray-200 p-4 space-y-4 bg-white">
-                  {/* PIC Selection dengan Paginasi */}
+                  {/* PIC Selection - Multiple Employees Support */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Nama PIC / Orang yang Mengerjakan
+                      Orang yang Mengerjakan (Bisa Lebih dari 1)
                     </label>
                     <AsyncSelect
-                      name="pic_employee"
+                      name="pic_employees"
                       loadOptions={loadEmployeesOptions}
                       defaultOptions={true}
-                      value={step.pic_id ? {
-                        value: step.pic_id,
-                        label: step.pic_nama || ''
-                      } : null}
-                      onChange={(option) => handleInputChange(step.step_number, 'pic_id', option ? option.value : null)}
+                      value={step.employees && step.employees.length > 0 
+                        ? step.employees.map(emp => ({
+                            value: emp.id,
+                            label: emp.nama
+                          }))
+                        : []}
+                      onChange={(options) => handleEmployeeChange(step.step_number, options)}
                       placeholder="-- Pilih Karyawan --"
                       isClearable
                       isSearchable
-                      isMulti={false}
+                      isMulti={true}
                       cacheOptions
                       classNamePrefix="react-select"
                       noOptionsMessage={() => 'Tidak ada karyawan'}

@@ -67,40 +67,78 @@ const authenticateToken = (req, res, next) => {
 
 // Routes
 
-// Login
+// Login (supports both admin users and employees)
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     const connection = await mysql.createConnection(dbConfig);
     
-    const [users] = await connection.execute(
-      'SELECT * FROM users WHERE username = ?',
+    // Try to find user in users table first (admin)
+    const [adminUsers] = await connection.execute(
+      'SELECT id, username, password FROM users WHERE username = ?',
       [username]
     );
 
-    await connection.end();
+    if (adminUsers.length > 0) {
+      const user = adminUsers[0];
+      const isValidPassword = await bcrypt.compare(password, user.password);
 
-    if (users.length === 0) {
+      if (!isValidPassword) {
+        await connection.end();
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign(
+        { id: user.id, username: user.username, role: 'admin', type: 'admin' },
+        JWT_SECRET,
+        { expiresIn: '360d' }
+      );
+
+      await connection.end();
+      return res.json({
+        success: true,
+        token,
+        user: { id: user.id, username: user.username, role: 'admin' }
+      });
+    }
+
+    // Try to find user in employees table (karyawan)
+    const [employees] = await connection.execute(
+      'SELECT id, nama, username, password, role, email, no_telpon FROM employees WHERE username = ?',
+      [username]
+    );
+
+    if (employees.length === 0) {
+      await connection.end();
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const user = users[0];
-    const isValidPassword = await bcrypt.compare(password, user.password);
+    const employee = employees[0];
+    const isValidPassword = await bcrypt.compare(password, employee.password);
 
     if (!isValidPassword) {
+      await connection.end();
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: employee.id, username: employee.username, nama: employee.nama, role: employee.role || 'karyawan', type: 'employee' },
       JWT_SECRET,
       { expiresIn: '360d' }
     );
 
+    await connection.end();
     res.json({
       success: true,
       token,
-      user: { id: user.id, username: user.username }
+      user: { 
+        id: employee.id, 
+        username: employee.username, 
+        nama: employee.nama,
+        email: employee.email,
+        no_telpon: employee.no_telpon,
+        role: employee.role || 'karyawan' 
+      }
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -580,22 +618,40 @@ app.post('/api/orders/:orderId/production/init', authenticateToken, async (req, 
   }
 });
 
-// Get all production steps for an order
+// Get all production steps for an order (with employee details)
 app.get('/api/orders/:orderId/production', authenticateToken, async (req, res) => {
   try {
     const { orderId } = req.params;
     const connection = await mysql.createConnection(dbConfig);
 
     const [steps] = await connection.execute(
-      `SELECT * FROM production_steps WHERE order_id = ? ORDER BY step_number ASC`,
+      `SELECT ps.*, 
+              GROUP_CONCAT(CONCAT(e.id, ':', e.nama) SEPARATOR '|') as employees_data
+       FROM production_steps ps
+       LEFT JOIN production_steps_employees pse ON ps.id = pse.production_step_id
+       LEFT JOIN employees e ON pse.employee_id = e.id
+       WHERE ps.order_id = ? 
+       GROUP BY ps.id
+       ORDER BY ps.step_number ASC`,
       [orderId]
     );
+
+    // Transform employees_data into array format
+    const stepsWithEmployees = steps.map(step => ({
+      ...step,
+      employees: step.employees_data 
+        ? step.employees_data.split('|').map(emp => {
+            const [id, nama] = emp.split(':');
+            return { id: parseInt(id), nama };
+          })
+        : []
+    }));
 
     await connection.end();
 
     res.json({
       success: true,
-      steps
+      steps: stepsWithEmployees
     });
   } catch (error) {
     console.error('Get production steps error:', error);
@@ -603,14 +659,20 @@ app.get('/api/orders/:orderId/production', authenticateToken, async (req, res) =
   }
 });
 
-// Get single production step
+// Get single production step (with employees)
 app.get('/api/orders/:orderId/production/:stepNumber', authenticateToken, async (req, res) => {
   try {
     const { orderId, stepNumber } = req.params;
     const connection = await mysql.createConnection(dbConfig);
 
     const [steps] = await connection.execute(
-      `SELECT * FROM production_steps WHERE order_id = ? AND step_number = ?`,
+      `SELECT ps.*, 
+              GROUP_CONCAT(CONCAT(e.id, ':', e.nama) SEPARATOR '|') as employees_data
+       FROM production_steps ps
+       LEFT JOIN production_steps_employees pse ON ps.id = pse.production_step_id
+       LEFT JOIN employees e ON pse.employee_id = e.id
+       WHERE ps.order_id = ? AND ps.step_number = ?
+       GROUP BY ps.id`,
       [orderId, stepNumber]
     );
 
@@ -620,9 +682,17 @@ app.get('/api/orders/:orderId/production/:stepNumber', authenticateToken, async 
       return res.status(404).json({ message: 'Production step not found' });
     }
 
+    const step = steps[0];
+    step.employees = step.employees_data 
+      ? step.employees_data.split('|').map(emp => {
+          const [id, nama] = emp.split(':');
+          return { id: parseInt(id), nama };
+        })
+      : [];
+
     res.json({
       success: true,
-      step: steps[0]
+      step
     });
   } catch (error) {
     console.error('Get production step error:', error);
@@ -630,16 +700,16 @@ app.get('/api/orders/:orderId/production/:stepNumber', authenticateToken, async 
   }
 });
 
-// Update production step
+// Update production step (supports multiple employees)
 app.put('/api/orders/:orderId/production/:stepNumber', authenticateToken, upload.array('photos', 10), async (req, res) => {
   try {
     const { orderId, stepNumber } = req.params;
-    const { tanggal, status, catatan, berat_sebelum, berat_sesudah, jenis_jahit, harga_jahit, pic_id, deletePhotos } = req.body;
+    const { tanggal, status, catatan, berat_sebelum, berat_sesudah, jenis_jahit, harga_jahit, employee_ids, deletePhotos } = req.body;
     const connection = await mysql.createConnection(dbConfig);
 
     // Get existing step
     const [existingSteps] = await connection.execute(
-      `SELECT photos FROM production_steps WHERE order_id = ? AND step_number = ?`,
+      `SELECT id, photos FROM production_steps WHERE order_id = ? AND step_number = ?`,
       [orderId, stepNumber]
     );
 
@@ -648,6 +718,7 @@ app.put('/api/orders/:orderId/production/:stepNumber', authenticateToken, upload
       return res.status(404).json({ message: 'Production step not found' });
     }
 
+    const stepId = existingSteps[0].id;
     let photos = existingSteps[0].photos ? JSON.parse(existingSteps[0].photos) : [];
 
     // Handle new photos
@@ -672,7 +743,6 @@ app.put('/api/orders/:orderId/production/:stepNumber', authenticateToken, upload
     // Update step
     await connection.execute(
       `UPDATE production_steps SET
-        pic_id = ?,
         tanggal = ?,
         status = ?,
         catatan = ?,
@@ -684,7 +754,6 @@ app.put('/api/orders/:orderId/production/:stepNumber', authenticateToken, upload
         updated_at = CURRENT_TIMESTAMP
        WHERE order_id = ? AND step_number = ?`,
       [
-        pic_id || null,
         tanggal || null,
         status || 'pending',
         catatan || null,
@@ -697,6 +766,27 @@ app.put('/api/orders/:orderId/production/:stepNumber', authenticateToken, upload
         stepNumber
       ]
     );
+
+    // Update employee assignments if provided
+    if (employee_ids) {
+      const empIds = Array.isArray(employee_ids) ? employee_ids : [employee_ids];
+      
+      // Delete existing assignments
+      await connection.execute(
+        'DELETE FROM production_steps_employees WHERE production_step_id = ?',
+        [stepId]
+      );
+
+      // Insert new assignments
+      for (const empId of empIds) {
+        if (empId) {
+          await connection.execute(
+            'INSERT INTO production_steps_employees (production_step_id, employee_id) VALUES (?, ?)',
+            [stepId, empId]
+          );
+        }
+      }
+    }
 
     await connection.end();
 

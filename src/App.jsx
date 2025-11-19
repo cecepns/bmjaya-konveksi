@@ -14,14 +14,23 @@ import './index.css';
 const logo = '/logo.png';
 
 // Protected Route Component
-function ProtectedRoute({ children }) {
+function ProtectedRoute({ children, requireAdmin = false }) {
   ProtectedRoute.propTypes = {
-    children: PropTypes.node.isRequired
+    children: PropTypes.node.isRequired,
+    requireAdmin: PropTypes.bool
   };
   const token = localStorage.getItem('token');
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
   
   if (!token) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (requireAdmin) {
+    const isAdmin = user.role === 'admin' || user.type === 'admin';
+    if (!isAdmin) {
+      return <Navigate to="/orders" replace />;
+    }
   }
   
   return children;
@@ -46,6 +55,9 @@ function MainLayout({ children }) {
   const isActive = (path) => {
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
+
+  // Check if user is admin (role should be admin or type should be admin for backward compatibility)
+  const isAdmin = user.role === 'admin' || user.type === 'admin';
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -76,22 +88,25 @@ function MainLayout({ children }) {
           
           {/* Navigation Menu */}
           <nav className="space-y-2">
+            {/* Show Dashboard for all users if admin, show Production Dashboard for karyawan */}
             <button
               onClick={() => {
-                navigate('/dashboard');
+                navigate(isAdmin ? '/dashboard' : '/orders');
                 setSidebarOpen(false);
               }}
               className={`w-full text-left px-4 py-3 rounded-md transition-colors text-sm ${
-                isActive('/dashboard')
+                isActive(isAdmin ? '/dashboard' : '/orders')
                   ? 'bg-primary-100 text-primary-700 font-medium' 
                   : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <span className="flex items-center">
                 <Home className="w-5 h-5 mr-3 flex-shrink-0" />
-                Dashboard
+                {isAdmin ? 'Dashboard' : 'Pesanan Saya'}
               </span>
             </button>
+            
+            {/* Show Orders Management for all users */}
             <button
               onClick={() => {
                 navigate('/orders');
@@ -108,22 +123,26 @@ function MainLayout({ children }) {
                 Kelola Pesanan
               </span>
             </button>
-            <button
-              onClick={() => {
-                navigate('/employees');
-                setSidebarOpen(false);
-              }}
-              className={`w-full text-left px-4 py-3 rounded-md transition-colors text-sm ${
-                isActive('/employees')
-                  ? 'bg-primary-100 text-primary-700 font-medium' 
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <span className="flex items-center">
-                <Users className="w-5 h-5 mr-3 flex-shrink-0" />
-                Manajemen Karyawan
-              </span>
-            </button>
+
+            {/* Show Employee Management only for admin */}
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  navigate('/employees');
+                  setSidebarOpen(false);
+                }}
+                className={`w-full text-left px-4 py-3 rounded-md transition-colors text-sm ${
+                  isActive('/employees')
+                    ? 'bg-primary-100 text-primary-700 font-medium' 
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <span className="flex items-center">
+                  <Users className="w-5 h-5 mr-3 flex-shrink-0" />
+                  Manajemen Karyawan
+                </span>
+              </button>
+            )}
           </nav>
 
           {/* Divider */}
@@ -133,7 +152,8 @@ function MainLayout({ children }) {
           <div className="space-y-4">
             <div className="px-4 py-3 bg-gray-50 rounded-md">
               <p className="text-xs text-gray-500 mb-1">Pengguna</p>
-              <p className="text-sm font-medium text-gray-700 truncate">{user.username}</p>
+              <p className="text-sm font-medium text-gray-700 truncate">{user.nama || user.username}</p>
+              <p className="text-xs text-gray-500 mt-1">{isAdmin ? 'Admin' : 'Karyawan'}</p>
             </div>
             <button
               onClick={handleLogout}
@@ -236,7 +256,7 @@ function App() {
         <Route
           path="/employees"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute requireAdmin={true}>
               <MainLayout>
                 <EmployeeManagement />
               </MainLayout>
